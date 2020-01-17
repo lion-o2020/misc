@@ -1,0 +1,252 @@
+#########################################################
+# APP_DYNAMICS - TWO IP PROD - CISCO UCS KICKstart     #
+# Updated by: Wes Chalmers                            #
+# On:         11/21/2019                             #
+#####################################################
+#version=DEVEL
+# Install OS instead of upgrade
+install
+text
+# Keyboard layouts
+keyboard 'us'
+# Root password
+rootpw --iscrypted $6$Hp05AI8FsGK8lB7R$oUeE6o7W4aparA6bYRoV5A8mzuvbxa./oNoy2FS5vsXbemsgdrbJGo7y0mvugr3AxZZk/LPUF891WPGHDa2/z0
+# System language
+lang en_US
+# Use CDROM installation media
+
+#url --url=http://augpcpdutlapp01.genpt.net/rhelinstalls/rhel7-oneip
+cdrom
+# SELinux configuration
+selinux --permissive
+firewall --disabled
+# System timezone
+timezone America/New_York
+# System bootloader configuration
+#bootloader --location=none
+bootloader --location=mbr --append="biosdevname=0"
+# Clear the Master Boot Record
+zerombr
+# Partition clearing information
+clearpart --all
+
+#part /boot --fstype xfs --size=512 --ondisk=sda --asprimary
+part /boot/efi --fstype efi --grow --maxsize=200 --size=20
+part /boot --fstype xfs --size=512
+part pv.9 --size=100 --grow --ondisk=sda --asprimary
+part pv.10 --size=100 --grow --ondisk=sdb --asprimary
+volgroup vg01 --pesize=32768 pv.9
+volgroup vg02 --pesize=32768 pv.10
+logvol / --fstype xfs --name=lvroot --vgname=vg01 --size=51200
+logvol /usr --fstype xfs --name=lvusr --vgname=vg01 --size=51200
+logvol /var --fstype xfs --name=lvvar --vgname=vg01 --size=51200
+logvol /opt --fstype xfs --name=lvopt --vgname=vg01 --size=358400
+logvol swap --fstype swap --name=lvswap --vgname=vg01 --size=102400
+logvol /tmp --fstype xfs --name=lvtmp --vgname=vg01 --size=51200
+logvol /home --fstype xfs --name=lvhome --vgname=vg01 --size=20480
+logvol /var/log --fstype xfs --name=lvvarlog --vgname=vg01 --size=102400
+logvol /var/log/audit --fstype xfs --name=lvvarlogaudit --vgname=vg01 --size=51200
+logvol /appdynamics --fstype xfs --name=lvappdynamics --vgname=vg02 --size=5427200
+
+# Install a default set of packages
+%packages --ignoremissing
+@additional-devel
+@base
+@client-mgmt-tools
+@compat-libraries
+@console-internet
+@core
+@debugging
+@development
+@directory-client
+@hardware-monitoring
+@large-systems
+@network-file-system-client
+@network-tools
+@performance
+@perl-runtime
+@system-management-snmp
+@server-platform
+@server-platform-devel
+@server-policy
+@system-management
+@system-admin-tools
+libXinerama-devel
+xorg-x11-proto-devel
+startup-notification-devel
+libgnomeui-devel
+libbonobo-devel
+libXau-devel
+libgcrypt-devel
+popt-devel
+libXrandr-devel
+libxslt-devel
+libglade2-devel
+gnutls-devel
+mtools
+pax
+python-dmidecode
+oddjob
+sgpio
+jpackage-utils
+certmonger
+pam_krb5
+krb5-workstation
+perl-DBD-SQLite
+%end
+%post --log=/root/ks-post2.log
+#!/bin/bash
+
+
+### Interactive network setup ###
+
+# Get network settings for front-end and back-end interfaces from console
+
+curTTY=`tty`
+exec < $curTTY > $curTTY 2> $curTTY
+while [ x"$answer" != "xy" ] && [ x"$answer" != "xY" ] ; do
+        echo -n "Enter Hostname: "; read hostname
+        echo -n "Enter IP for Front-End Interface: "; read ipfe
+        echo -n "Enter Netmask for Front-End Interface: "; read netmaskfe
+	echo -n "Enter IP for Back-End Interface: "; read ipbe
+        echo -n "Enter Netmask for Back-End Interface: "; read netmaskbe
+        echo -n "Enter Default Gateway (Front-End): "; read gw
+	echo -n "Enter Back-End Gateway: "; read begw
+        echo
+ 
+        echo You entered:
+        echo -e "\tHostname: $hostname"
+        echo -e "\tFront-End IP: $ipfe"
+        echo -e "\tFront-End Netmask: $netmaskfe"
+        echo -e "\tBack-End IP: $ipbe"
+        echo -e "\tBack-End Netmask: $netmaskbe"
+        echo -e "\tDefault Gateway (Front-End): $gw"
+	echo -e "\tBack-End Gateway: $begw"
+        echo -n "Is this correct? [y/n] "; read answer
+done
+
+# Create network scripts for 2 interfaces using eno1
+
+cat << EOF1 >/etc/sysconfig/network
+NETWORKING=yes
+NETWORKING_IPV6=no
+HOSTNAME=$hostname
+EOF1
+
+hwaddr=`ifconfig enp28s0f0 | grep ether | awk '{print $2}'`
+
+cat << EOF2 >/etc/sysconfig/network-scripts/ifcfg-enp28s0f0
+NAME=enp28s0f0
+HWADDR=$hwaddr
+IPADDR=$ipfe
+NETMASK=$netmaskfe
+GATEWAY=$gw
+USERCTL=no
+BOOTPROTO=none
+ONBOOT=yes
+IPV6INIT=no
+DEFROUTE=yes
+EOF2
+
+hwaddr=`ifconfig enp28s0f1 | grep ether | awk '{print $2}'`
+
+cat << EOF3 >/etc/sysconfig/network-scripts/ifcfg-enp28s0f1
+NAME=enp28s0f1
+HWADDR=$hwaddr
+IPADDR=$ipbe
+NETMASK=$netmaskbe
+USERCTL=no
+BOOTPROTO=none
+ONBOOT=yes
+IPV6INIT=no
+DEFROUTE=yes
+EOF3
+
+cat << EOF4 >/etc/sysconfig/network-scripts/route-enp28s0f1
+10.0.0.0/8 via $begw dev enp28s0f1
+EOF4
+
+
+DATACENTER=`echo "${ipfe}" | cut -d\. -f 2`
+
+# Create /etc/resolv.conf based on server location (10.6.x.x is Dallas)
+
+if [ $DATACENTER -eq 6 ]; then
+
+cat <<- EOF5 > /etc/resolv.conf
+search genpt.net
+nameserver 10.6.152.5
+nameserver 10.5.152.5
+EOF5
+
+else
+
+cat <<- EOF6 > /etc/resolv.conf
+search genpt.net
+nameserver 10.5.152.5
+nameserver 10.6.152.5
+EOF6
+
+fi
+
+### End interactive network setup ###
+
+# Set hostname
+hostname ${hostname}
+
+# Import Puppet GPG key
+/bin/sudo rpm -Uvh http://augpcpdsatapp04.genpt.net/pub/katello-ca-consumer-latest.noarch.rpm
+
+# Register server with Satellite 6.6
+/bin/sudo subscription-manager register --org=gpc --activationkey=rhel_7server_physical
+
+# Need to wait because virt-who is terrible
+/bin/sleep 15
+
+# Trying again after waiting
+/bin/sudo subscription-manager attach --auto
+
+# Enabling Satellite Tools Repo
+/bin/sudo subscription-manager repos --enable=rhel-*-satellite-tools-*-rpms
+
+# Diable rhel-7-server-eus-thirdparty-oracle-java-rpms and rhel-7-server-thirdparty-oracle-java-rpms
+
+/bin/sudo subscription-manager repos --disable=rhel-7-server-eus-thirdparty-oracle-java-rpms
+/bin/sudo subscription-manager repos --disable=rhel-7-server-thirdparty-oracle-java-rpms
+
+# Installing Katello Agent OpenManage and All Dell System Updates
+#/bin/sudo yum -t -y -e 0 install katello-agent srvadmin-all dell-system-update
+
+# Enable the goferd service
+/bin/sudo systemctl enable goferd.service
+
+# Start the goferd service
+/bin/sudo systemctl start goferd.service
+
+# Install Puppet Agent
+/bin/curl -k https://augpcpdpupapp05.genpt.net:8140/packages/current/install.bash | sudo bash
+
+# Run Puppet Agent # This is commented out because it runs into the yum update #
+/usr/bin/puppet agent -t
+
+#/bin/sleep 15
+
+/bin/echo -n "*** Do you want to fully update all packages on this server to the latest versions yum -y update? "; read answer5
+if [ x"$answer5" = "xy" ] || [ x"$answer5" = "xY" ]; then
+  /usr/bin/yum -y update --skip-broken
+else
+  echo " "
+  echo "NO UPDATES APPLIED!!!"
+  echo " "
+  sleep 3
+fi
+
+/bin/echo "${hostname} server setup is now complete!"
+%end
+
+#################################
+#                              #  
+# Created By: Hiral Patel     #
+# On:         10/22/2019     #
+# Rev 1.0     10/22/2019    # 
+############################
